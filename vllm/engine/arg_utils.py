@@ -31,6 +31,7 @@ class EngineArgs:
     dtype: str = 'auto'
     kv_cache_dtype: str = 'auto'
     quantization_param_path: Optional[str] = None
+    quantization_backend: Optional[str] = None
     seed: int = 0
     max_model_len: Optional[int] = None
     worker_use_ray: bool = False
@@ -204,6 +205,12 @@ class EngineArgs:
             'FP8_E5M2 (without scaling) is only supported on cuda version'
             'greater than 11.8. On ROCm (AMD GPU), FP8_E4M3 is instead '
             'supported for common inference criteria.')
+        parser.add_argument(
+            "--quantization-backend",
+            type=nullable_str,
+            default=None,
+            help="select alternative quant implementation for given quant method.",
+        )
         parser.add_argument('--max-model-len',
                             type=int,
                             default=EngineArgs.max_model_len,
@@ -526,13 +533,26 @@ class EngineArgs:
     def create_engine_config(self, ) -> EngineConfig:
         device_config = DeviceConfig(self.device)
         model_config = ModelConfig(
-            self.model, self.tokenizer, self.tokenizer_mode,
-            self.trust_remote_code, self.dtype, self.seed, self.revision,
-            self.code_revision, self.tokenizer_revision, self.max_model_len,
-            self.quantization, self.quantization_param_path,
-            self.enforce_eager, self.max_context_len_to_capture,
-            self.max_seq_len_to_capture, self.max_logprobs,
-            self.skip_tokenizer_init, self.served_model_name)
+            self.model,
+            self.tokenizer,
+            self.tokenizer_mode,
+            self.trust_remote_code,
+            self.dtype,
+            self.seed,
+            self.revision,
+            self.code_revision,
+            self.tokenizer_revision,
+            self.max_model_len,
+            self.quantization,
+            self.quantization_param_path,
+            self.quantization_backend,
+            self.enforce_eager,
+            self.max_context_len_to_capture,
+            self.max_seq_len_to_capture,
+            self.max_logprobs,
+            self.skip_tokenizer_init,
+            self.served_model_name,
+        )
         cache_config = CacheConfig(self.block_size,
                                    self.gpu_memory_utilization,
                                    self.swap_space, self.kv_cache_dtype,

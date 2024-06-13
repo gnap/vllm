@@ -40,6 +40,8 @@ def _get_quantization_config(
     """Get the quantization config."""
     if model_config.quantization is not None:
         quant_config = get_quant_config(model_config, load_config)
+        logger.info("using quant backend %s", model_config.quantization_backend)
+        quant_config.set_quant_backend(model_config.quantization_backend)
         capability = torch.cuda.get_device_capability()
         capability = capability[0] * 10 + capability[1]
         if capability < quant_config.get_min_capability():

@@ -95,3 +95,17 @@ class QuantizationConfig(ABC):
         For now, this is only used by AWQ.
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def get_quant_backend(self) -> Optional[str]:
+        """Get the quantize backend to use for the quantized layer.
+
+        Returns:
+            The quantize backend name. None if the backend is not set.
+        """
+        return None
+
+    @abstractmethod
+    def set_quant_backend(self, name: str):
+        """Set the quantize backend to use for the quantized layer."""
+        return

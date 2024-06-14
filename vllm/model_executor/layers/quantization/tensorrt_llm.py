@@ -2,7 +2,7 @@ import enum
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from tllm_qmm import W4A16
+from tllm_qmm import W4A16, W4A8_FP8
 from tllm_qmm import WeightOnlyGroupwiseQuantGEMM
 import torch
 from torch import nn
@@ -178,18 +178,8 @@ class TLLMAWQLinearMethod(LinearMethodBase):
         layer.register_parameter("scales", scales)
         set_weight_attrs(scales, extra_weight_attrs)
 
-        """
-        self.tllm_matmul = WeightOnlyGroupwiseQuantGEMM(
-            W4A16,
-            1,
-            8192,
-            input_size_per_partition,
-            output_size_per_partition,
-            self.quant_config.group_size,
-            False,
-        )
-        """
-
+        self.fp8_alpha = torch.tensor([1], dtype=torch.float32)
+        self.pre_quant_scale = self.fp8_alpha.reciprocal().half()
         self.plugin_state = TLLMPluginState.UNINITIALIZED
 
     def apply(
@@ -204,20 +194,6 @@ class TLLMAWQLinearMethod(LinearMethodBase):
         pack_factor = self.quant_config.pack_factor
         out_shape = x.shape[:-1] + (qweight.shape[-1] * pack_factor,)
         reshaped_x = x.reshape(-1, x.shape[-1])
-
-        # num_tokens >= threshold
-        """
-        FP16_MATMUL_HEURISTIC_CONDITION = x.shape[:-1].numel() >= 256
-
-        if FP16_MATMUL_HEURISTIC_CONDITION:
-            out = ops.awq_dequantize(qweight, scales, qzeros, 0, 0, 0)
-            out = torch.matmul(reshaped_x, out)
-        else:
-            out = ops.awq_gemm(reshaped_x, qweight, scales, qzeros, pack_factor)
-        if bias is not None:
-            out.add_(bias)
-
-        """
 
         if self.plugin_state == TLLMPluginState.UNINITIALIZED:
             self.tllm_matmul = WeightOnlyGroupwiseQuantGEMM(
@@ -246,16 +222,72 @@ class TLLMAWQLinearMethod(LinearMethodBase):
         )
         return out.reshape(out_shape)
 
-    def process_weights_after_loading(self, layer: nn.Module) -> None:
-        """Process the weight after loading.
 
-        This can be used for example, to transpose weights for computation.
-        """
-        """
-        qweight, qzeros = self.tllm_matmul.preprocess_weights(
-            layer.qweight, layer.qzeros, layer.scales
+def to_float8(x, dtype=torch.float8_e4m3fn):
+    finfo = torch.finfo(dtype)
+    # Calculate the scale as dtype max divided by absmax
+    if x.abs().max() > finfo.max:
+        scale_orig = (finfo.max - 0) / x.abs().max()
+    else:
+        scale_orig = torch.tensor(1.0, dtype=x.dtype, device=x.device)
+    scale = scale_orig.clamp(min=1e-12)
+    # scale = finfo.max / x.abs().max().clamp(min=1e-12)
+    # scale and clamp the tensor to bring it to
+    # the representative range of float8 data type
+    # (as default cast is unsaturated)
+    x_scl_sat = (x * scale).clamp(min=finfo.min, max=finfo.max)
+    # Return both float8 data and the inverse scale (as float),
+    # as both required as inputs to torch._scaled_mm
+    # return x_scl_sat.to(dtype), scale.float().reciprocal()
+    return x_scl_sat.to(dtype), scale.float()
+
+
+class TLLMAWQFP8LinearMethod(TLLMAWQLinearMethod):
+
+    def apply(
+        self,
+        layer: torch.nn.Module,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        qweight = layer.qweight
+        scales = layer.scales
+        qzeros = layer.qzeros
+        pack_factor = self.quant_config.pack_factor
+        out_shape = x.shape[:-1] + (qweight.shape[-1] * pack_factor,)
+        reshaped_x = x.reshape(-1, x.shape[-1])
+
+        if self.plugin_state == TLLMPluginState.UNINITIALIZED:
+            self.tllm_matmul = WeightOnlyGroupwiseQuantGEMM(
+                W4A8_FP8,
+                1,
+                reshaped_x.shape[0],
+                qweight.shape[0],
+                qweight.shape[1] * pack_factor,
+                self.quant_config.group_size,
+                False,
+            )
+            qweight, qzeros = self.tllm_matmul.preprocess_weights(
+                layer.qweight, layer.qzeros, layer.scales
+            )
+            layer.qweight = Parameter(qweight.view(torch.int32), requires_grad=False)
+            layer.qzeros = Parameter(qzeros, requires_grad=False)
+            self.plugin_state = TLLMPluginState.READY
+
+        # _, fp8_alpha = to_float8(reshaped_x)
+        # _, fp8_alpha = ops.scaled_fp8_quant(reshaped_x)
+        fp8_alpha = self.fp8_alpha
+        pre_quant_scale = self.pre_quant_scale.repeat(reshaped_x.shape)
+        # print(reshaped_x.abs().max())
+        # print(fp8_alpha)
+        # print(pre_quant_scale)
+
+        out = self.tllm_matmul.forward(
+            reshaped_x,
+            pre_quant_scale,
+            qweight.view(torch.half),
+            scales,
+            qzeros,
+            fp8_alpha,
         )
-        layer.qweight = Parameter(qweight.view(torch.int32), requires_grad=False)
-        layer.qzeros = Parameter(qzeros, requires_grad=False)
-        """
-        return
+        return out.reshape(out_shape)

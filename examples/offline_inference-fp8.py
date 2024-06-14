@@ -34,8 +34,8 @@ llm = LLM(
     model=model_id,
     trust_remote_code=True,
     max_model_len=8192,
-    # quantization_backend="tllm",
-    quantization_backend=None,
+    quantization_backend="tllm_w4a8_fp8",
+    # quantization_backend=None,
 )
 # llm = LLM(model="casperhansen/llama-3-8b-instruct-awq", trust_remote_code=True)
 

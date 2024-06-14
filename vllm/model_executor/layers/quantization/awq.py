@@ -7,7 +7,10 @@ from vllm import _custom_ops as ops
 from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
-from vllm.model_executor.layers.quantization.tensorrt_llm import TLLMAWQLinearMethod
+from vllm.model_executor.layers.quantization.tensorrt_llm import (
+    TLLMAWQLinearMethod,
+    TLLMAWQFP8LinearMethod,
+)
 from vllm.model_executor.utils import set_weight_attrs
 
 
@@ -71,6 +74,8 @@ class AWQConfig(QuantizationConfig):
         if isinstance(layer, LinearBase):
             if self.get_quant_backend() == "tllm":
                 return TLLMAWQLinearMethod(self)
+            elif self.get_quant_backend() == "tllm_w4a8_fp8":
+                return TLLMAWQFP8LinearMethod(self)
             else:
                 return AWQLinearMethod(self)
         return None

@@ -352,14 +352,9 @@ class TLLMAWQFP8LinearMethod(TLLMAWQLinearMethod):
         out_shape = x.shape[:-1] + (qweight.shape[-1] * pack_factor,)
         reshaped_x = x.reshape(-1, x.shape[-1])
 
-        """
-
-        # perform the float8 matmul
-        out_scaled, _ = torch._scaled_mm(x_f8, w_f8, out_dtype=torch.float16,
-                scale_a=x_inv_s , scale_b=w_inv_s)
-        out_torch = torch.matmul(x, out_dq)
-        """
         if self.plugin_state == TLLMPluginState.UNINITIALIZED:
+            # vllm warmups with max_model_len, so instanlize plugin
+            # in the first forward.
             self.tllm_matmul = WeightOnlyGroupwiseQuantGEMM(
                 W4A8_FP8,
                 1,
@@ -369,24 +364,15 @@ class TLLMAWQFP8LinearMethod(TLLMAWQLinearMethod):
                 self.quant_config.group_size,
                 False,
             )
-            # qweight, qzeros = self.tllm_matmul.preprocess_weights(
-            #    layer.qweight, layer.qzeros, layer.scales
-            # )
+            # for fp8
             out_dq = ops.awq_dequantize(qweight, scales, qzeros, 0, 0, 0)
             out_cm = torch.empty(
                 tuple(reversed(out_dq.shape)), dtype=out_dq.dtype, device=out_dq.device
             )
+            # trt needs column major.
             out_cm.t()[:] = out_dq[:]
-
-            # x_view = x.view((-1, x.size(-1))) # to 2-D matrix shape
-            # dyamic act scale
-            # x_f8, x_inv_s = to_float8(x_view, dtype=torch.float8_e4m3fn)
-            # x_f8, x_inv_s = ops.scaled_fp8_quant(x_view)
-            # if x_inv_s.item() > 1.0:
-            # quant to fp8
+            # fp8 double quant.
             _, w_inv_s = ops.scaled_fp8_quant(out_cm.t())
-            # print(x_view.abs().max().item(), x_inv_s.item(), out_cm.abs().max().item(), w_inv_s.item())
-            # w_f8, w_inv_s = to_float8(out_cm.t())
 
             scales = (layer.scales.float() / w_inv_s).half()
             qweight, qzeros = self.tllm_matmul.preprocess_weights(
@@ -399,28 +385,15 @@ class TLLMAWQFP8LinearMethod(TLLMAWQLinearMethod):
             layer.scales = Parameter(scales, requires_grad=False)
             layer.fp8_alpha = Parameter(w_inv_s, requires_grad=False)
             self.plugin_state = TLLMPluginState.READY
-        # fp8_alpha = to_float8(reshaped_x)[1]
-        # _, fp8_alpha = to_float8(reshaped_x)
-        x_fp8, x_inv_s = ops.scaled_fp8_quant(reshaped_x)
-        # if x_inv_s.item() > 1.0:
-        #    print(reshaped_x.abs().max().item(), x_inv_s.item())
-        # fp8_alpha = self.fp8_alpha
+        _, x_inv_s = ops.scaled_fp8_quant(reshaped_x)
         pre_quant_scale = x_inv_s.reciprocal().half().repeat(reshaped_x.shape)
-        # pre_quant_scale = self.pre_quant_scale.repeat(reshaped_x.shape)
-        # print(fp8_alpha)
-        # print(pre_quant_scale)
 
         out = self.tllm_matmul.forward(
-            x_fp8.to(torch.half),
-            torch.ones_like(pre_quant_scale),
-            # reshaped_x,
-            # pre_quant_scale,
+            reshaped_x,
+            pre_quant_scale,
             qweight.view(torch.half),
             scales,
             qzeros,
             x_inv_s * layer.fp8_alpha,
         )
-        # print(x_view.abs().max().item(), x_inv_s.item(), out_cm.abs().max().item(), w_inv_s.item(), (out - out_scaled).abs().max().item())
-        # print((out - out_torch).abs().max().item() - (out_scaled - out_torch).abs().max().item(), "tllm:", (out - out_torch).abs().max().item(), "scaled:", (out_scaled - out_torch).abs().max().item(), x_view.abs().max().item(), x_inv_s.reciprocal().item(), out_cm.abs().max().item(), w_inv_s.reciprocal().item())
-
         return out.reshape(out_shape)

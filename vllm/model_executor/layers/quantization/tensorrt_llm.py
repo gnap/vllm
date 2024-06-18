@@ -13,7 +13,7 @@ from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
 from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
 from vllm.model_executor.utils import set_weight_attrs
 
-
+# TODO remove this
 class TLLMAWQConfig(QuantizationConfig):
     """Config class for AWQ.
 

@@ -178,8 +178,8 @@ class TLLMAWQLinearMethod(LinearMethodBase):
         layer.register_parameter("scales", scales)
         set_weight_attrs(scales, extra_weight_attrs)
 
-        self.fp8_alpha = torch.tensor([1], dtype=torch.float32)
-        self.pre_quant_scale = self.fp8_alpha.reciprocal().half()
+        # self.fp8_alpha = torch.tensor([1], dtype=torch.float32)
+        # self.pre_quant_scale = self.fp8_alpha.reciprocal().half()
         self.plugin_state = TLLMPluginState.UNINITIALIZED
 
     def apply(
@@ -220,6 +220,8 @@ class TLLMAWQLinearMethod(LinearMethodBase):
             qzeros,
             torch.empty_like(reshaped_x),
         )
+        if bias is not None:
+            out.add_(bias)
         return out.reshape(out_shape)
 
 
@@ -396,4 +398,6 @@ class TLLMAWQFP8LinearMethod(TLLMAWQLinearMethod):
             qzeros,
             x_inv_s * layer.fp8_alpha,
         )
+        if bias is not None:
+            out.add_(bias)
         return out.reshape(out_shape)

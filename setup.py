@@ -401,7 +401,7 @@ if envs.VLLM_USE_PRECOMPILED:
 setup(
     name="vllm-zh",
     # version=get_vllm_version() + ".dev202406181747",
-    version="0.4.2.dev202406181747",
+    version="0.4.2.dev202406191705",
     author="vLLM Team",
     license="Apache 2.0",
     description=(

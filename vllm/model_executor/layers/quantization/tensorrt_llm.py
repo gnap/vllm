@@ -2,8 +2,12 @@ import enum
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from tllm_qmm import W4A16, W4A8_FP8
-from tllm_qmm import WeightOnlyGroupwiseQuantGEMM
+try:
+    from tllm_qmm import W4A16, W4A8_FP8
+    from tllm_qmm import WeightOnlyGroupwiseQuantGEMM as WOQ_GEMM
+except:
+    WOQ_GEMM = None
+
 import torch
 from torch import nn
 from torch.nn.parameter import Parameter
@@ -94,6 +98,7 @@ class TLLMAWQLinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: TLLMAWQConfig):
+        assert WOQ_GEMM is not None, "install tllm_qmm first."
         self.quant_config = quant_config
 
     def create_weights(
@@ -196,7 +201,7 @@ class TLLMAWQLinearMethod(LinearMethodBase):
         reshaped_x = x.reshape(-1, x.shape[-1])
 
         if self.plugin_state == TLLMPluginState.UNINITIALIZED:
-            self.tllm_matmul = WeightOnlyGroupwiseQuantGEMM(
+            self.tllm_matmul = WOQ_GEMM(
                 W4A16,
                 1,
                 reshaped_x.shape[0],
@@ -357,7 +362,7 @@ class TLLMAWQFP8LinearMethod(TLLMAWQLinearMethod):
         if self.plugin_state == TLLMPluginState.UNINITIALIZED:
             # vllm warmups with max_model_len, so instanlize plugin
             # in the first forward.
-            self.tllm_matmul = WeightOnlyGroupwiseQuantGEMM(
+            self.tllm_matmul = WOQ_GEMM(
                 W4A8_FP8,
                 1,
                 reshaped_x.shape[0],

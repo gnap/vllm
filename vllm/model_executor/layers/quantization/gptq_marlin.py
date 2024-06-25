@@ -11,6 +11,11 @@ from vllm.model_executor.layers.linear import (LinearBase, LinearMethodBase,
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
 
+from vllm.model_executor.layers.quantization.tensorrt_llm import (
+    TLLMGPTQLinearMethod,
+    TLLMAWQFP8LinearMethod,
+)
+
 GPTQ_MARLIN_TILE = 16
 GPTQ_MARLIN_MIN_THREAD_N = 64
 GPTQ_MARLIN_MIN_THREAD_K = 128
@@ -120,12 +125,24 @@ class GPTQMarlinConfig(QuantizationConfig):
     def get_quant_method(
             self,
             layer: torch.nn.Module) -> Optional["GPTQMarlinLinearMethod"]:
+
         if isinstance(layer, LinearBase):
-            return GPTQMarlinLinearMethod(self)
+            if self.get_quant_backend() == "tllm":
+                return TLLMGPTQLinearMethod(self)
+            elif self.get_quant_backend() == "tllm_w4a8_fp8":
+                return TLLMAWQFP8LinearMethod(self)
+            else:
+                return GPTQMarlinLinearMethod(self)
         return None
 
     def get_scaled_act_names(self) -> List[str]:
-        return []
+        return ["gelu", "gelu_fast", "gelu_new", "gelu_pytorch_tanh"]
+
+    def get_quant_backend(self) -> Optional[str]:
+        return self.quant_backend
+
+    def set_quant_backend(self, name: str):
+        self.quant_backend = name
 
     @classmethod
     def is_marlin_compatible(cls, quant_config: Dict[str, Any]):

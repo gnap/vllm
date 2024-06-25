@@ -96,7 +96,7 @@ class QuantizationConfig(ABC):
         """
         raise NotImplementedError
 
-    @abstractmethod
+    # @abstractmethod
     def get_quant_backend(self) -> Optional[str]:
         """Get the quantize backend to use for the quantized layer.
 
@@ -105,7 +105,7 @@ class QuantizationConfig(ABC):
         """
         return None
 
-    @abstractmethod
+    # @abstractmethod
     def set_quant_backend(self, name: str):
         """Set the quantize backend to use for the quantized layer."""
         return

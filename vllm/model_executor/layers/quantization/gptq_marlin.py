@@ -13,7 +13,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 
 from vllm.model_executor.layers.quantization.tensorrt_llm import (
     TLLMGPTQLinearMethod,
-    TLLMAWQFP8LinearMethod,
+    TLLMGPTQFP8LinearMethod,
 )
 
 GPTQ_MARLIN_TILE = 16
@@ -130,7 +130,7 @@ class GPTQMarlinConfig(QuantizationConfig):
             if self.get_quant_backend() == "tllm":
                 return TLLMGPTQLinearMethod(self)
             elif self.get_quant_backend() == "tllm_w4a8_fp8":
-                return TLLMAWQFP8LinearMethod(self)
+                return TLLMGPTQFP8LinearMethod(self)
             else:
                 return GPTQMarlinLinearMethod(self)
         return None

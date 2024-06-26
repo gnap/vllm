@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 try:
     from tllm_qmm import W4A16, W4A8_FP8
     from tllm_qmm import WeightOnlyGroupwiseQuantGEMM as WOQ_GEMM
+    from tllm_qmm.gptq_utils import dequantize_weight
 except Exception as e:
     print(e)
     WOQ_GEMM = None
@@ -553,7 +554,7 @@ class TLLMGPTQLinearMethod(LinearMethodBase):
         out_shape = x.shape[:-1] + (part_size_n,)
         if self.plugin_state == TLLMPluginState.UNINITIALIZED:
             self.tllm_matmul = WOQ_GEMM(
-                W4A16,
+                W4A16 | 1,
                 1,
                 reshaped_x.shape[0],
                 # qweight.shape[0],
@@ -576,8 +577,219 @@ class TLLMGPTQLinearMethod(LinearMethodBase):
             qweight.view(torch.half),
             scales,
             qzeros,
+            (
+                bias
+                if bias is not None
+                else torch.zeros(
+                    [1, part_size_n],
+                    dtype=reshaped_x.dtype,
+                    device=reshaped_x.device,
+                )
+            ),
             torch.empty_like(reshaped_x),
         )
+        """
         if bias is not None:
+            print("has bias")
             out.add_(bias)
+        """
+        return out.reshape(out_shape)
+
+
+class TLLMGPTQFP8LinearMethod(TLLMGPTQLinearMethod):
+
+    def create_weights(
+        self,
+        layer: torch.nn.Module,
+        input_size_per_partition: int,
+        output_partition_sizes: List[int],
+        input_size: int,
+        output_size: int,
+        params_dtype: torch.dtype,
+        **extra_weight_attrs,
+    ):
+        del output_size  # Unused.
+        if input_size_per_partition % self.quant_config.group_size != 0:
+            raise ValueError(
+                "The input size is not aligned with the quantized "
+                "weight shape. This can be caused by too large "
+                "tensor parallel size."
+            )
+        output_size_per_partition = sum(output_partition_sizes)
+        if output_size_per_partition % self.quant_config.pack_factor.numerator != 0:
+            raise ValueError(
+                "The output size is not aligned with the quantized "
+                "weight shape. This can be caused by too large "
+                "tensor parallel size."
+            )
+
+        if self.quant_config.group_size != -1:
+            group_size = self.quant_config.group_size
+        else:
+            group_size = input_size
+        scale_and_zero_size = input_size // group_size
+        scale_and_zero_input_dim = None
+        if (
+            input_size != input_size_per_partition
+            and self.quant_config.group_size != -1
+        ):
+            # For act-order models, we cannot use Exllama for row parallel layer
+            if self.quant_config.desc_act:
+                assert False
+            else:
+                # we need to partition qzeros and scales for exllama kernel
+                scale_and_zero_size = input_size_per_partition // group_size
+                scale_and_zero_input_dim = 0
+
+        qweight = Parameter(
+            torch.empty(
+                input_size_per_partition // self.quant_config.pack_factor,
+                output_size_per_partition,
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
+        set_weight_attrs(
+            qweight,
+            {
+                "input_dim": 0,
+                "output_dim": 1,
+                "packed_dim": 0,
+                "pack_factor": self.quant_config.pack_factor,
+            },
+        )
+        g_idx = Parameter(
+            torch.tensor(
+                [
+                    i // self.quant_config.group_size
+                    for i in range(input_size_per_partition)
+                ],
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
+        # Ignore warning from fused linear layers such as QKVParallelLinear.
+        set_weight_attrs(g_idx, {"input_dim": 0, "ignore_warning": True})
+        qzeros = Parameter(
+            torch.empty(
+                scale_and_zero_size,
+                output_size_per_partition // self.quant_config.pack_factor,
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
+        set_weight_attrs(
+            qzeros,
+            {
+                "input_dim": scale_and_zero_input_dim,
+                "output_dim": 1,
+                "packed_dim": 1,
+                "pack_factor": self.quant_config.pack_factor,
+            },
+        )
+        scales = Parameter(
+            torch.empty(
+                scale_and_zero_size,
+                output_size_per_partition,
+                dtype=params_dtype,
+            ),
+            requires_grad=False,
+        )
+        set_weight_attrs(
+            scales,
+            {
+                "input_dim": scale_and_zero_input_dim,
+                "output_dim": 1,
+            },
+        )
+
+        fp8_alpha = Parameter(
+            torch.empty(
+                1,
+                dtype=torch.float32,
+            ),
+            requires_grad=False,
+        )
+        layer.register_parameter("qweight", qweight)
+        set_weight_attrs(qweight, extra_weight_attrs)
+        layer.register_parameter("g_idx", g_idx)
+        set_weight_attrs(g_idx, extra_weight_attrs)
+        layer.register_parameter("qzeros", qzeros)
+        set_weight_attrs(qzeros, extra_weight_attrs)
+        layer.register_parameter("scales", scales)
+        set_weight_attrs(scales, extra_weight_attrs)
+        layer.register_parameter("fp8_alpha", fp8_alpha)
+        set_weight_attrs(fp8_alpha, extra_weight_attrs)
+
+        layer.output_size_per_partition = output_size_per_partition
+        self.plugin_state = TLLMPluginState.UNINITIALIZED
+
+    def apply(
+        self,
+        layer: torch.nn.Module,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        qweight = layer.qweight
+        scales = layer.scales
+        qzeros = layer.qzeros
+        pack_factor = self.quant_config.pack_factor
+        # out_shape = x.shape[:-1] + (qweight.shape[-1] * pack_factor,)
+        reshaped_x = x.reshape(-1, x.shape[-1])
+        part_size_n = layer.output_size_per_partition
+
+        out_shape = x.shape[:-1] + (part_size_n,)
+        if self.plugin_state == TLLMPluginState.UNINITIALIZED:
+            self.tllm_matmul = WOQ_GEMM(
+                W4A8_FP8 | 1,
+                1,
+                reshaped_x.shape[0],
+                # qweight.shape[0],
+                # qweight.shape[1] * pack_factor,
+                qweight.shape[0] * pack_factor,
+                qweight.shape[1],
+                self.quant_config.group_size,
+                False,
+            )
+            # for fp8
+            out_dq = dequantize_weight(qweight, qzeros, scales)
+            out_cm = torch.empty(
+                tuple(reversed(out_dq.shape)), dtype=out_dq.dtype, device=out_dq.device
+            )
+            # trt needs column major.
+            out_cm.t()[:] = out_dq[:]
+            # fp8 double quant.
+            _, w_inv_s = ops.scaled_fp8_quant(out_cm.t())
+
+            scales = (layer.scales.float() / w_inv_s).half()
+            qweight, qzeros = self.tllm_matmul.preprocess_weights_gptq(
+                layer.qweight, layer.qzeros, scales
+            )
+            layer.qweight = Parameter(qweight.view(torch.int32), requires_grad=False)
+            layer.qzeros = Parameter(qzeros, requires_grad=False)
+            layer.scales = Parameter(scales, requires_grad=False)
+            layer.fp8_alpha = Parameter(w_inv_s, requires_grad=False)
+
+            self.plugin_state = TLLMPluginState.READY
+
+        _, x_inv_s = ops.scaled_fp8_quant(reshaped_x)
+        pre_quant_scale = x_inv_s.reciprocal().half().repeat(reshaped_x.shape)
+
+        out = self.tllm_matmul.forward(
+            reshaped_x,
+            pre_quant_scale,
+            qweight.view(torch.half),
+            scales,
+            qzeros,
+            (
+                bias
+                if bias is not None
+                else torch.zeros(
+                    [1, part_size_n],
+                    dtype=reshaped_x.dtype,
+                    device=reshaped_x.device,
+                )
+            ),
+            x_inv_s * layer.fp8_alpha,
+        )
         return out.reshape(out_shape)

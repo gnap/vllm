@@ -38,8 +38,8 @@ llm = LLM(
     trust_remote_code=True,
     max_model_len=8192,
     # quantization="gptq",
-    # quantization_backend="tllm",
-    quantization_backend="tllm_w4a8_fp8",
+    quantization_backend="tllm",
+    # quantization_backend="tllm_w4a8_fp8",
     enforce_eager=True,
 )
 

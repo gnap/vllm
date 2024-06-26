@@ -204,7 +204,7 @@ class TLLMAWQLinearMethod(LinearMethodBase):
 
         if self.plugin_state == TLLMPluginState.UNINITIALIZED:
             self.tllm_matmul = WOQ_GEMM(
-                W4A16,
+                W4A16 | 1,
                 1,
                 reshaped_x.shape[0],
                 qweight.shape[0],
@@ -225,10 +225,17 @@ class TLLMAWQLinearMethod(LinearMethodBase):
             qweight.view(torch.half),
             scales,
             qzeros,
+            (
+                bias
+                if bias is not None
+                else torch.zeros(
+                    [1, qweight.shape[-1] * pack_factor],
+                    dtype=reshaped_x.dtype,
+                    device=reshaped_x.device,
+                )
+            ),
             torch.empty_like(reshaped_x),
         )
-        if bias is not None:
-            out.add_(bias)
         return out.reshape(out_shape)
 
 
@@ -365,7 +372,7 @@ class TLLMAWQFP8LinearMethod(TLLMAWQLinearMethod):
             # vllm warmups with max_model_len, so instanlize plugin
             # in the first forward.
             self.tllm_matmul = WOQ_GEMM(
-                W4A8_FP8,
+                W4A8_FP8 | 1,
                 1,
                 reshaped_x.shape[0],
                 qweight.shape[0],
@@ -403,10 +410,17 @@ class TLLMAWQFP8LinearMethod(TLLMAWQLinearMethod):
             qweight.view(torch.half),
             scales,
             qzeros,
+            (
+                bias
+                if bias is not None
+                else torch.zeros(
+                    [1, qweight.shape[-1] * pack_factor],
+                    dtype=reshaped_x.dtype,
+                    device=reshaped_x.device,
+                )
+            ),
             x_inv_s * layer.fp8_alpha,
         )
-        if bias is not None:
-            out.add_(bias)
         return out.reshape(out_shape)
 
 

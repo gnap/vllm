@@ -568,7 +568,7 @@ class TLLMGPTQLinearMethod(LinearMethodBase):
         out_shape = x.shape[:-1] + (part_size_n,)
         if self.plugin_state == TLLMPluginState.UNINITIALIZED:
             self.tllm_matmul = WOQ_GEMM(
-                W4A16 | 1,
+                (W4A16 | 1) if bias is not None else W4A16,
                 1,
                 reshaped_x.shape[0],
                 # qweight.shape[0],
@@ -594,7 +594,7 @@ class TLLMGPTQLinearMethod(LinearMethodBase):
             (
                 bias
                 if bias is not None
-                else torch.zeros(
+                else torch.empty(
                     [1, part_size_n],
                     dtype=reshaped_x.dtype,
                     device=reshaped_x.device,
@@ -602,11 +602,6 @@ class TLLMGPTQLinearMethod(LinearMethodBase):
             ),
             torch.empty_like(reshaped_x),
         )
-        """
-        if bias is not None:
-            print("has bias")
-            out.add_(bias)
-        """
         return out.reshape(out_shape)
 
 
@@ -755,7 +750,7 @@ class TLLMGPTQFP8LinearMethod(TLLMGPTQLinearMethod):
         out_shape = x.shape[:-1] + (part_size_n,)
         if self.plugin_state == TLLMPluginState.UNINITIALIZED:
             self.tllm_matmul = WOQ_GEMM(
-                W4A8_FP8 | 1,
+                (W4A8_FP8 | 1) if bias is not None else W4A8_FP8,
                 1,
                 reshaped_x.shape[0],
                 # qweight.shape[0],
@@ -787,7 +782,8 @@ class TLLMGPTQFP8LinearMethod(TLLMGPTQLinearMethod):
             self.plugin_state = TLLMPluginState.READY
 
         _, x_inv_s = ops.scaled_fp8_quant(reshaped_x)
-        pre_quant_scale = x_inv_s.reciprocal().half().repeat(reshaped_x.shape)
+        # pre_quant_scale = x_inv_s.reciprocal().half().repeat(reshaped_x.shape)
+        pre_quant_scale = x_inv_s.reciprocal().half().repeat(1, reshaped_x.shape[-1])
 
         out = self.tllm_matmul.forward(
             reshaped_x,
@@ -798,8 +794,8 @@ class TLLMGPTQFP8LinearMethod(TLLMGPTQLinearMethod):
             (
                 bias
                 if bias is not None
-                else torch.zeros(
-                    [1, part_size_n],
+                else torch.empty(
+                    (0,),
                     dtype=reshaped_x.dtype,
                     device=reshaped_x.device,
                 )

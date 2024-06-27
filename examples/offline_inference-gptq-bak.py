@@ -38,8 +38,8 @@ llm = LLM(
     trust_remote_code=True,
     max_model_len=8192,
     # quantization="gptq",
-    quantization_backend="tllm",
-    # quantization_backend="tllm_w4a8_fp8",
+    # quantization_backend="tllm",
+    quantization_backend="tllm_w4a8_fp8",
     enforce_eager=True,
 )
 
@@ -53,7 +53,7 @@ prompts = [
 print("token lens:", [len(t) for t in prompts])
 # Generate texts from the prompts. The output is a list of RequestOutput objects
 # that contain the prompt, generated text, and other information.
-for i in range(10):
+for i in range(20):
     outputs = llm.generate(prompts, sampling_params)
     # Print the outputs.
     for output in outputs:

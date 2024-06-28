@@ -87,6 +87,7 @@ with torch.no_grad():
     )
     for i in range(10):
         cuda_out = ops.gptq_gemm(inputs, qweight, qzeros, scales, g_idx, True, 4) + bias
+    torch.cuda.synchronize()
     # awq dequantize
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)

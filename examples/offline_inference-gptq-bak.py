@@ -71,7 +71,12 @@ for output in outputs:
     metrics = output.metrics
     generated_text = output.outputs[0].text
     print(len(output.prompt_token_ids))
-    print("TTFT:", metrics.first_token_time - metrics.arrival_time)
     print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
+    print("TTFT:", metrics.first_token_time - metrics.arrival_time)
+    print(
+        "TBT:",
+        (metrics.finished_time - metrics.first_token_time)
+        / len(output.outputs[0].token_ids),
+    )
 
 print(time.time() - start)

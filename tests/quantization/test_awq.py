@@ -79,19 +79,19 @@ with torch.no_grad():
         inputs * fp8_alpha.half(), pre_quant_scale.repeat(input_rows, 1)
     )
     for i in range(10):
-        cuda_out = ops.awq_gemm(inputs, qweight, scales, qzeros, 4)
+        # cuda_out = ops.awq_gemm(inputs, qweight, scales, qzeros, 4)
+        torch_dq = ops.awq_dequantize(qweight, scales, qzeros, 0, 0, 0)
+        cuda_out = torch.matmul(inputs, torch_dq)
+    torch.cuda.synchronize()
     # awq dequantize
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
     start_event.record()
-    """
-    torch_dq = dequantize_gemm(qweight, qzeros, scales, w_bit, group_size)
-    torch_out = torch.matmul(
-        tinputs,
-        torch_dq,
-    )
+    torch_dq = ops.awq_dequantize(qweight, scales, qzeros, 0, 0, 0)
+    cuda_out = torch.matmul(inputs, torch_dq)
     """
     cuda_out = ops.awq_gemm(inputs, qweight, scales, qzeros, 4)
+    """
     stop_event.record()
     torch.cuda.synchronize()
     print(f"cuda time: {start_event.elapsed_time(stop_event)}ms")

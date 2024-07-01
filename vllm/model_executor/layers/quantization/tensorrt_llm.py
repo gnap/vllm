@@ -382,13 +382,9 @@ class TLLMAWQFP8LinearMethod(TLLMAWQLinearMethod):
             )
             # for fp8
             out_dq = ops.awq_dequantize(qweight, scales, qzeros, 0, 0, 0)
-            out_cm = torch.empty(
-                tuple(reversed(out_dq.shape)), dtype=out_dq.dtype, device=out_dq.device
-            )
-            # trt needs column major.
-            out_cm.t()[:] = out_dq[:]
+
             # fp8 double quant.
-            _, w_inv_s = ops.scaled_fp8_quant(out_cm.t())
+            _, w_inv_s = ops.scaled_fp8_quant(out_dq)
 
             scales = (layer.scales.float() / w_inv_s).half()
             qweight, qzeros = self.tllm_matmul.preprocess_weights(
@@ -761,13 +757,8 @@ class TLLMGPTQFP8LinearMethod(TLLMGPTQLinearMethod):
             )
             # for fp8
             out_dq = dequantize_weight(qweight, qzeros, scales)
-            out_cm = torch.empty(
-                tuple(reversed(out_dq.shape)), dtype=out_dq.dtype, device=out_dq.device
-            )
-            # trt needs column major.
-            out_cm.t()[:] = out_dq[:]
             # fp8 double quant.
-            _, w_inv_s = ops.scaled_fp8_quant(out_cm.t())
+            _, w_inv_s = ops.scaled_fp8_quant(out_dq)
 
             scales = (layer.scales.float() / w_inv_s).half()
             qweight, qzeros = self.tllm_matmul.preprocess_weights_gptq(

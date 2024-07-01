@@ -401,12 +401,11 @@ class TLLMAWQFP8LinearMethod(TLLMAWQLinearMethod):
             layer.scales = Parameter(scales, requires_grad=False)
             layer.fp8_alpha = Parameter(w_inv_s, requires_grad=False)
             self.plugin_state = TLLMPluginState.READY
-        _, x_inv_s = ops.scaled_fp8_quant(reshaped_x)
-        pre_quant_scale = x_inv_s.reciprocal().half().repeat(reshaped_x.shape)
+        xinput, x_inv_s = ops.scaled_fp8_quant(reshaped_x)
 
         out = self.tllm_matmul.forward(
-            reshaped_x,
-            pre_quant_scale,
+            xinput,
+            torch.empty([0], dtype=torch.half, device=xinput.device),
             qweight.view(torch.half),
             scales,
             qzeros,
@@ -781,13 +780,11 @@ class TLLMGPTQFP8LinearMethod(TLLMGPTQLinearMethod):
 
             self.plugin_state = TLLMPluginState.READY
 
-        _, x_inv_s = ops.scaled_fp8_quant(reshaped_x)
-        # pre_quant_scale = x_inv_s.reciprocal().half().repeat(reshaped_x.shape)
-        pre_quant_scale = x_inv_s.reciprocal().half().repeat(1, reshaped_x.shape[-1])
+        xinput, x_inv_s = ops.scaled_fp8_quant(reshaped_x)
 
         out = self.tllm_matmul.forward(
-            reshaped_x,
-            pre_quant_scale,
+            xinput,
+            torch.empty([0], dtype=torch.half, device=xinput.device),
             qweight.view(torch.half),
             scales,
             qzeros,

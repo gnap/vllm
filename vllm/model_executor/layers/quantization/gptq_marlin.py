@@ -136,7 +136,7 @@ class GPTQMarlinConfig(QuantizationConfig):
         return None
 
     def get_scaled_act_names(self) -> List[str]:
-        return ["gelu", "gelu_fast", "gelu_new", "gelu_pytorch_tanh"]
+        return []
 
     def get_quant_backend(self) -> Optional[str]:
         return self.quant_backend
